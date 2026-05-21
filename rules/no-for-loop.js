@@ -100,17 +100,12 @@ const getIndexIdentifierName = forStatement => {
 		return;
 	}
 
-	if (variableDeclaration.declarations.length !== 1) {
-		return;
-	}
+	const variableDeclarator = variableDeclaration.declarations.find(variableDeclarator =>
+		isLiteralZero(variableDeclarator.init)
+		&& variableDeclarator.id.type === 'Identifier',
+	);
 
-	const [variableDeclarator] = variableDeclaration.declarations;
-
-	if (!isLiteralZero(variableDeclarator.init)) {
-		return;
-	}
-
-	if (variableDeclarator.id.type !== 'Identifier') {
+	if (!variableDeclarator) {
 		return;
 	}
 
@@ -133,7 +128,43 @@ const getStrictComparisonOperands = binaryExpression => {
 	}
 };
 
-const getArrayIdentifierFromBinaryExpression = (binaryExpression, indexIdentifierName) => {
+const getArrayIdentifierFromLengthExpression = node => {
+	if (node.type !== 'MemberExpression') {
+		return;
+	}
+
+	if (
+		node.object.type !== 'Identifier'
+		|| node.property.type !== 'Identifier'
+	) {
+		return;
+	}
+
+	if (node.property.name !== 'length') {
+		return;
+	}
+
+	return node.object;
+};
+
+const getArrayIdentifierFromInitializer = (forStatement, identifierName) => {
+	const {init: variableDeclaration} = forStatement;
+
+	if (
+		!variableDeclaration
+		|| variableDeclaration.type !== 'VariableDeclaration'
+	) {
+		return;
+	}
+
+	const variableDeclarator = variableDeclaration.declarations.find(variableDeclarator =>
+		isIdentifierWithName(variableDeclarator.id, identifierName),
+	);
+
+	return variableDeclarator?.init && getArrayIdentifierFromLengthExpression(variableDeclarator.init);
+};
+
+const getArrayIdentifierFromBinaryExpression = (binaryExpression, indexIdentifierName, forStatement) => {
 	const operands = getStrictComparisonOperands(binaryExpression);
 
 	if (!operands) {
@@ -146,22 +177,15 @@ const getArrayIdentifierFromBinaryExpression = (binaryExpression, indexIdentifie
 		return;
 	}
 
-	if (greater.type !== 'MemberExpression') {
+	if (greater.type === 'Identifier') {
+		return getArrayIdentifierFromInitializer(forStatement, greater.name);
+	}
+
+	if (forStatement.init.declarations.length > 1) {
 		return;
 	}
 
-	if (
-		greater.object.type !== 'Identifier'
-		|| greater.property.type !== 'Identifier'
-	) {
-		return;
-	}
-
-	if (greater.property.name !== 'length') {
-		return;
-	}
-
-	return greater.object;
+	return getArrayIdentifierFromLengthExpression(greater);
 };
 
 const getArrayIdentifier = (forStatement, indexIdentifierName) => {
@@ -171,7 +195,7 @@ const getArrayIdentifier = (forStatement, indexIdentifierName) => {
 		return;
 	}
 
-	return getArrayIdentifierFromBinaryExpression(test, indexIdentifierName);
+	return getArrayIdentifierFromBinaryExpression(test, indexIdentifierName, forStatement);
 };
 
 const isLiteralOnePlusIdentifierWithName = (node, identifierName) => {
@@ -418,7 +442,9 @@ const create = context => {
 				return typeAnnotation && !isArrayType(typeAnnotation, scope);
 			});
 
-		const shouldFix = !someVariablesLeakOutOfTheLoop(node, [indexVariable, elementVariable].filter(Boolean), forScope)
+		const hasExtraInitializerDeclarations = node.init.declarations.length > 1;
+		const shouldFix = !hasExtraInitializerDeclarations
+			&& !someVariablesLeakOutOfTheLoop(node, [indexVariable, elementVariable].filter(Boolean), forScope)
 			&& !elementNode?.id.typeAnnotation
 			&& !(hasNonArrayTypeAnnotation && shouldGenerateIndex);
 

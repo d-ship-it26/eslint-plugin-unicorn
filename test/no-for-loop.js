@@ -205,6 +205,12 @@ test({
 				console.log(i, el);
 			}
 		`),
+		testCase(outdent`
+			for (let i = 0, j = arr.length; i < j; i += 1) {
+				const element = arr[i];
+				console.log(element);
+			}
+		`),
 
 		testCase(outdent`
 			for (let i = 0; i < arr.length; i++) {
